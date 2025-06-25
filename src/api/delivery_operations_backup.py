@@ -3,53 +3,268 @@
 DaVinci Resolve Delivery Page Operations
 """
 
+import os
 import logging
 from typing import Dict, Any, List, Optional, Union, Tuple
 from ..utils.page_manager import ensure_page
-from ..utils.response_formatter import success_response, error_response
+from ..utils.response_formatter import success, error, info
+from ..utils.validation import validate_choice, validate_file_path, validate_non_empty_string, ValidationError
+from ..utils.error_handler import handle_resolve_errors, validate_resolve_connection
 
 logger = logging.getLogger("davinci-resolve-mcp.delivery")
 
-@ensure_page("deliver")
-def get_render_presets(resolve) -> List[Dict[str, Any]]:
-    """Get all available render presets in the current project.
-    
-    Args:
-        resolve: DaVinci Resolve instance
+def register_delivery_operations(mcp, resolve: Optional[object]):
+    """Register delivery page operations with the MCP server."""
+
+    @mcp.resource("resolve://delivery/render-presets")
+    @ensure_page("deliver")
+    @handle_resolve_errors
+    def get_render_presets() -> Dict[str, Any]:
+        """Get all available render presets in the current project."""
+        try:
+            validate_resolve_connection(resolve)
+            
+            project_manager = resolve.GetProjectManager()
+            current_project = project_manager.GetCurrentProject()
+            
+            if not current_project:
+                return error("No project is currently open")
+            
+            render_settings = current_project.GetRenderSettings()
+            if not render_settings:
+                return error("Failed to get render settings")
+            
+            presets = []
+            
+            # Get project presets
+            try:
+                project_presets = render_settings.GetRenderPresetList()
+                for preset in project_presets:
+                    preset_info = {
+                        "name": preset,
+                        "type": "project",
+                        "description": f"Project preset: {preset}"
+                    }
+                    presets.append(preset_info)
+            except Exception as e:
+                logger.warning(f"Failed to get project presets: {str(e)}")
+            
+            # Get system presets (if available)
+            try:
+                system_presets = render_settings.GetSystemPresetList()
+                for preset in system_presets:
+                    preset_info = {
+                        "name": preset,
+                        "type": "system",
+                        "description": f"System preset: {preset}"
+                    }
+                    presets.append(preset_info)
+            except Exception as e:
+                logger.warning(f"Failed to get system presets: {str(e)}")
+            
+            return success(f"Retrieved {len(presets)} render presets", presets)
+            
+        except Exception as e:
+            return error(f"Error getting render presets: {str(e)}")
+
+    @mcp.tool()
+    @ensure_page("deliver")
+    @handle_resolve_errors
+    def add_to_render_queue(preset_name: str, timeline_name: Optional[str] = None,
+                           use_in_out_range: bool = False,
+                           render_settings: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+        """Add the current timeline or a specific timeline to the render queue.
         
-    Returns:
-        List of dictionaries containing preset information
-    """
-    if not resolve:
-        logger.error("No connection to DaVinci Resolve")
-        return error_response("No connection to DaVinci Resolve")
-    
-    project_manager = resolve.GetProjectManager()
-    if not project_manager:
-        logger.error("Failed to get Project Manager")
-        return error_response("Failed to get Project Manager")
-    
-    current_project = project_manager.GetCurrentProject()
-    if not current_project:
-        logger.error("No project is currently open")
-        return error_response("No project is currently open")
-    
-    render_settings = current_project.GetRenderSettings()
-    if not render_settings:
-        logger.error("Failed to get render settings")
-        return error_response("Failed to get render settings")
-    
-    presets = []
-    
-    # Get project presets
-    try:
-        project_presets = render_settings.GetRenderPresetList()
-        for preset in project_presets:
-            preset_info = {
-                "name": preset,
-                "type": "project",
-                "details": {}
-            }
+        Args:
+            preset_name: Name of the render preset to use
+            timeline_name: Name of the timeline to render (uses current if None)
+            use_in_out_range: Whether to render only the in/out range instead of entire timeline
+            render_settings: Additional render settings to apply (optional)
+        """
+        try:
+            validate_resolve_connection(resolve)
+            validate_non_empty_string(preset_name, "preset_name")
+            
+            logger.info(f"Adding timeline to render queue with preset: {preset_name}")
+            
+            project_manager = resolve.GetProjectManager()
+            current_project = project_manager.GetCurrentProject()
+            
+            if not current_project:
+                return error("No project is currently open")
+            
+            # Get the timeline to render
+            if timeline_name:
+                validate_non_empty_string(timeline_name, "timeline_name")
+                # Find timeline by name
+                timeline_count = current_project.GetTimelineCount()
+                target_timeline = None
+                
+                for i in range(1, timeline_count + 1):
+                    timeline = current_project.GetTimelineByIndex(i)
+                    if timeline and timeline.GetName() == timeline_name:
+                        target_timeline = timeline
+                        break
+                
+                if not target_timeline:
+                    return error(f"Timeline '{timeline_name}' not found")
+                
+                timeline = target_timeline
+            else:
+                timeline = current_project.GetCurrentTimeline()
+                if not timeline:
+                    return error("No timeline currently active")
+            
+            actual_timeline_name = timeline.GetName()
+            logger.info(f"Using timeline: {actual_timeline_name}")
+            
+            # Get render settings interface
+            render_settings_interface = current_project.GetRenderSettings()
+            if not render_settings_interface:
+                return error("Failed to get render settings interface")
+            
+            # Validate the preset
+            available_presets = render_settings_interface.GetRenderPresetList()
+            if preset_name not in available_presets:
+                return error(f"Preset '{preset_name}' not found. Available presets: {', '.join(available_presets[:5])}")
+            
+            # Apply the render preset
+            settings_to_apply = {"SelectPreset": preset_name}
+            logger.info(f"Applying render preset: {preset_name}")
+            
+            # Add any additional render settings if provided
+            if render_settings:
+                settings_to_apply.update(render_settings)
+            
+            # Apply render settings
+            if not render_settings_interface.SetRenderSettings(settings_to_apply):
+                return error("Failed to apply render settings")
+            
+            # Configure in/out range if specified
+            if use_in_out_range:
+                in_point = timeline.GetStartFrame()
+                out_point = timeline.GetEndFrame()
+                settings_to_apply.update({
+                    "MarkIn": in_point,
+                    "MarkOut": out_point
+                })
+            
+            # Add to render queue
+            result = current_project.AddRenderJob()
+            
+            if result:
+                return success(f"Successfully added '{actual_timeline_name}' to render queue with preset '{preset_name}'",
+                             {"timeline": actual_timeline_name, "preset": preset_name, "in_out_range": use_in_out_range})
+            else:
+                return error("Failed to add timeline to render queue")
+            
+        except ValidationError as e:
+            return error(f"Validation error: {str(e)}")
+        except Exception as e:
+            return error(f"Error adding to render queue: {str(e)}")
+
+    @mcp.tool()
+    @ensure_page("deliver")
+    @handle_resolve_errors
+    def start_render() -> Dict[str, Any]:
+        """Start rendering all jobs in the render queue."""
+        try:
+            validate_resolve_connection(resolve)
+            
+            project_manager = resolve.GetProjectManager()
+            current_project = project_manager.GetCurrentProject()
+            
+            if not current_project:
+                return error("No project is currently open")
+            
+            # Check if there are jobs in the queue
+            render_queue_status = current_project.GetRenderQueueItems()
+            if not render_queue_status:
+                return error("No jobs in render queue")
+            
+            # Start rendering
+            result = current_project.StartRendering()
+            
+            if result:
+                job_count = len(render_queue_status)
+                return success(f"Successfully started rendering {job_count} jobs",
+                             {"jobs_count": job_count})
+            else:
+                return error("Failed to start rendering")
+            
+        except Exception as e:
+            return error(f"Error starting render: {str(e)}")
+
+    @mcp.resource("resolve://delivery/render-queue-status")
+    @ensure_page("deliver")
+    @handle_resolve_errors
+    def get_render_queue_status() -> Dict[str, Any]:
+        """Get the current status of the render queue."""
+        try:
+            validate_resolve_connection(resolve)
+            
+            project_manager = resolve.GetProjectManager()
+            current_project = project_manager.GetCurrentProject()
+            
+            if not current_project:
+                return error("No project is currently open")
+            
+            # Get render queue items
+            render_queue_items = current_project.GetRenderQueueItems()
+            
+            if not render_queue_items:
+                return info("Render queue is empty", {"jobs": [], "total_jobs": 0})
+            
+            jobs_info = []
+            for i, job in enumerate(render_queue_items):
+                job_info = {
+                    "index": i + 1,
+                    "status": job.get("JobStatus", "Unknown"),
+                    "completion_percentage": job.get("CompletionPercentage", 0),
+                    "timeline_name": job.get("TimelineName", "Unknown"),
+                    "preset_name": job.get("PresetName", "Unknown"),
+                    "output_filename": job.get("OutputFilename", "Unknown")
+                }
+                jobs_info.append(job_info)
+            
+            return success(f"Render queue status retrieved ({len(jobs_info)} jobs)",
+                         {"jobs": jobs_info, "total_jobs": len(jobs_info)})
+            
+        except Exception as e:
+            return error(f"Error getting render queue status: {str(e)}")
+
+    @mcp.tool()
+    @ensure_page("deliver")
+    @handle_resolve_errors
+    def clear_render_queue() -> Dict[str, Any]:
+        """Clear all jobs from the render queue."""
+        try:
+            validate_resolve_connection(resolve)
+            
+            project_manager = resolve.GetProjectManager()
+            current_project = project_manager.GetCurrentProject()
+            
+            if not current_project:
+                return error("No project is currently open")
+            
+            # Get current job count
+            render_queue_items = current_project.GetRenderQueueItems()
+            job_count = len(render_queue_items) if render_queue_items else 0
+            
+            if job_count == 0:
+                return info("Render queue is already empty")
+            
+            # Clear the render queue
+            result = current_project.DeleteAllRenderJobs()
+            
+            if result:
+                return success(f"Successfully cleared render queue ({job_count} jobs removed)",
+                             {"jobs_removed": job_count})
+            else:
+                return error("Failed to clear render queue")
+            
+        except Exception as e:
+            return error(f"Error clearing render queue: {str(e)}")
             
             # Try to get detailed information about the preset
             try:

@@ -372,6 +372,9 @@ def open_project(name: str) -> str:
 
 @mcp.tool()
 def create_project(name: str) -> str:
+
+@mcp.tool()
+def create_project(name: str) -> str:
     """Create a new project with the given name.
     
     Args:
@@ -1820,9 +1823,6 @@ def delete_optimized_media(clip_names: List[str] = None) -> str:
                     break
             if not found:
                 missing_clips.append(name)
-        
-        if missing_clips:
-            return f"Error: Could not find these clips: {', '.join(missing_clips)}"
         
         if not clips_to_process:
             return "Error: No valid clips found to process"

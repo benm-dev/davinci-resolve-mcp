@@ -6,6 +6,8 @@ DaVinci Resolve Media Operations
 import logging
 import os
 from typing import List, Dict, Any, Optional
+from ..utils.page_manager import ensure_page
+from ..utils.response_formatter import success_response, error_response, validate_numeric_range
 
 logger = logging.getLogger("davinci-resolve-mcp.media")
 

@@ -5,9 +5,12 @@ DaVinci Resolve Color Page Operations
 
 import logging
 from typing import Dict, Any, List, Optional, Tuple, Union
+from ..utils.page_manager import ensure_page
+from ..utils.response_formatter import success_response, error_response
 
 logger = logging.getLogger("davinci-resolve-mcp.color")
 
+@ensure_page("color")
 def get_current_node(resolve) -> Dict[str, Any]:
     """Get information about the current node in the color page.
     
@@ -18,32 +21,27 @@ def get_current_node(resolve) -> Dict[str, Any]:
         Dictionary with current node information
     """
     if resolve is None:
-        return {"error": "Not connected to DaVinci Resolve"}
+        return error_response("Not connected to DaVinci Resolve")
     
     project_manager = resolve.GetProjectManager()
     if not project_manager:
-        return {"error": "Failed to get Project Manager"}
+        return error_response("Failed to get Project Manager")
     
     current_project = project_manager.GetCurrentProject()
     if not current_project:
-        return {"error": "No project currently open"}
-    
-    # First, ensure we're on the color page
-    current_page = resolve.GetCurrentPage()
-    if current_page.lower() != "color":
-        return {"error": f"Not on Color page. Current page is: {current_page}"}
+        return error_response("No project currently open")
     
     # Get the current timeline
     current_timeline = current_project.GetCurrentTimeline()
     if not current_timeline:
-        return {"error": "No timeline currently active"}
+        return error_response("No timeline currently active")
     
     try:
         # Access color-specific functionality through the timeline
         # First get the current clip in the timeline
         current_clip = current_timeline.GetCurrentVideoItem()
         if not current_clip:
-            return {"error": "No clip is currently selected in the timeline"}
+            return error_response("No clip is currently selected in the timeline")
         
         # Get the clip's grade
         current_grade = current_clip.GetCurrentGrade()
