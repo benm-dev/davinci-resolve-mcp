@@ -4,9 +4,42 @@ DaVinci Resolve Project Operations
 """
 
 import logging
-from typing import List, Dict, Any
+from typing import List, Dict, Any, Optional
 
 logger = logging.getLogger("davinci-resolve-mcp.project")
+
+def register_project_operations(mcp, resolve: Optional[object]):
+    """Register project operations with the MCP server."""
+    
+    @mcp.resource("resolve://projects")
+    def list_projects_resource() -> List[str]:
+        """List all available projects in the current database."""
+        return list_projects(resolve)
+    
+    @mcp.resource("resolve://current-project")
+    def get_current_project_resource() -> str:
+        """Get the name of the currently open project."""
+        return get_current_project_name(resolve)
+    
+    @mcp.tool()
+    def open_project_tool(name: str) -> str:
+        """Open a project by name."""
+        return open_project(resolve, name)
+    
+    @mcp.tool()
+    def create_project_tool(name: str) -> str:
+        """Create a new project."""
+        return create_project(resolve, name)
+    
+    @mcp.tool()
+    def save_project_tool() -> str:
+        """Save the current project."""
+        return save_project(resolve)
+    
+    @mcp.tool()
+    def close_project_tool() -> str:
+        """Close the current project."""
+        return close_project(resolve)
 
 def list_projects(resolve) -> List[str]:
     """List all available projects in the current database."""
@@ -108,4 +141,4 @@ def save_project(resolve) -> str:
         # Another approach: DaVinci Resolve auto-saves, so we can just confirm the project exists
         return f"Project '{project_name}' is saved (auto-save enabled in DaVinci Resolve)"
     except Exception as e:
-        return f"Error checking project: {str(e)}" 
+        return f"Error checking project: {str(e)}"

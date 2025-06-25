@@ -5,9 +5,27 @@ DaVinci Resolve Media Operations
 
 import logging
 import os
-from typing import List, Dict, Any
+from typing import List, Dict, Any, Optional
 
 logger = logging.getLogger("davinci-resolve-mcp.media")
+
+def register_media_operations(mcp, resolve: Optional[object]):
+    """Register media operations with the MCP server."""
+    
+    @mcp.resource("resolve://media-pool-clips")
+    def list_media_pool_clips_resource() -> List[Dict[str, Any]]:
+        """List all clips in the media pool of the current project."""
+        return list_media_pool_clips(resolve)
+    
+    @mcp.tool()
+    def import_media_tool(file_paths: List[str]) -> str:
+        """Import media files into the media pool."""
+        return import_media(resolve, file_paths)
+    
+    @mcp.tool()
+    def create_bin_tool(bin_name: str) -> str:
+        """Create a new bin in the media pool."""
+        return create_bin(resolve, bin_name)
 
 def list_media_pool_clips(resolve) -> List[Dict[str, Any]]:
     """List all clips in the media pool of the current project."""

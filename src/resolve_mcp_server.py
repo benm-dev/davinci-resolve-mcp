@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 """
-DaVinci Resolve MCP Server
+DaVinci Resolve MCP Server - Modular Architecture
 A server that connects to DaVinci Resolve via the Model Context Protocol (MCP)
 
-Version: 1.3.8 - Improved Cursor Integration, Entry Point Standardization
+Version: 1.4.0 - Modular Architecture with comprehensive Fusion effects
 """
 
 import os
@@ -36,53 +36,18 @@ if RESOLVE_MODULES_PATH not in sys.path:
 # Import MCP
 from mcp.server.fastmcp import FastMCP
 
-# Import our utility functions
-from src.utils.platform import setup_environment, get_platform, get_resolve_paths
-from src.utils.object_inspection import (
-    inspect_object,
-    get_object_methods,
-    get_object_properties,
-    print_object_help,
-    convert_lua_to_python
-)
-from src.utils.layout_presets import (
-    list_layout_presets,
-    save_layout_preset,
-    load_layout_preset,
-    export_layout_preset,
-    import_layout_preset,
-    delete_layout_preset
-)
-from src.utils.app_control import (
-    quit_resolve_app,
-    get_app_state,
-    restart_resolve_app,
-    open_project_settings,
-    open_preferences
-)
-from src.utils.cloud_operations import (
-    create_cloud_project,
-    import_cloud_project,
-    restore_cloud_project,
-    get_cloud_project_list,
-    export_project_to_cloud,
-    add_user_to_cloud_project,
-    remove_user_from_cloud_project
-)
-from src.utils.project_properties import (
-    get_all_project_properties,
-    get_project_property,
-    set_project_property,
-    get_timeline_format_settings,
-    set_timeline_format,
-    get_superscale_settings,
-    set_superscale_settings,
-    get_color_settings,
-    set_color_science_mode,
-    set_color_space,
-    get_project_metadata,
-    get_project_info
-)
+# Import operation modules
+from src.api.core_operations import register_core_operations
+from src.api.project_operations import register_project_operations
+from src.api.timeline_operations import register_timeline_operations
+from src.api.media_operations import register_media_operations
+from src.api.color_operations import register_color_operations
+from src.api.delivery_operations import register_delivery_operations
+from src.api.fusion_operations import register_fusion_operations
+from src.api.fairlight_operations import register_fairlight_operations
+from src.api.cache_management import register_cache_operations
+from src.api.keyframe_control import register_keyframe_operations
+from src.api.object_inspection import register_inspection_operations
 
 # Configure logging
 logging.basicConfig(
@@ -93,11 +58,91 @@ logging.basicConfig(
 logger = logging.getLogger("davinci-resolve-mcp")
 
 # Log server version and platform
-VERSION = "1.3.8"
+VERSION = "1.4.0"
 logger.info(f"Starting DaVinci Resolve MCP Server v{VERSION}")
 logger.info(f"Detected platform: {get_platform()}")
 logger.info(f"Using Resolve API path: {RESOLVE_API_PATH}")
 logger.info(f"Using Resolve library path: {RESOLVE_LIB_PATH}")
+
+# Create MCP server instance
+mcp = FastMCP("DaVinciResolveMCP")
+
+# Initialize connection to DaVinci Resolve
+def initialize_resolve() -> Optional[object]:
+    """Initialize connection to DaVinci Resolve."""
+    try:
+        # Direct import from the Modules directory
+        sys.path.insert(0, RESOLVE_MODULES_PATH)
+        import DaVinciResolveScript as dvr_script
+        resolve = dvr_script.scriptapp("Resolve")
+        if resolve:
+            logger.info(f"Connected to DaVinci Resolve: {resolve.GetProductName()} {resolve.GetVersionString()}")
+            return resolve
+        else:
+            logger.error("Failed to get Resolve object. Is DaVinci Resolve running?")
+            return None
+    except ImportError as e:
+        logger.error(f"Failed to import DaVinciResolveScript: {str(e)}")
+        logger.error("Check that DaVinci Resolve is installed and running.")
+        logger.error(f"RESOLVE_SCRIPT_API: {RESOLVE_API_PATH}")
+        logger.error(f"RESOLVE_SCRIPT_LIB: {RESOLVE_LIB_PATH}")
+        logger.error(f"RESOLVE_MODULES_PATH: {RESOLVE_MODULES_PATH}")
+        logger.error(f"sys.path: {sys.path}")
+        return None
+    except Exception as e:
+        logger.error(f"Unexpected error initializing Resolve: {str(e)}")
+        return None
+
+# Initialize Resolve connection
+resolve = initialize_resolve()
+
+# Register all operation modules
+logger.info("Registering operation modules...")
+
+try:
+    register_core_operations(mcp, resolve)
+    logger.info("✓ Core operations registered")
+    
+    register_project_operations(mcp, resolve)
+    logger.info("✓ Project operations registered")
+    
+    register_timeline_operations(mcp, resolve)
+    logger.info("✓ Timeline operations registered")
+    
+    register_media_operations(mcp, resolve)
+    logger.info("✓ Media operations registered")
+    
+    register_color_operations(mcp, resolve)
+    logger.info("✓ Color operations registered")
+    
+    register_delivery_operations(mcp, resolve)
+    logger.info("✓ Delivery operations registered")
+    
+    register_fusion_operations(mcp, resolve)
+    logger.info("✓ Fusion operations registered")
+    
+    register_fairlight_operations(mcp, resolve)
+    logger.info("✓ Fairlight operations registered")
+    
+    register_cache_operations(mcp, resolve)
+    logger.info("✓ Cache management registered")
+    
+    register_keyframe_operations(mcp, resolve)
+    logger.info("✓ Keyframe control registered")
+    
+    register_inspection_operations(mcp, resolve)
+    logger.info("✓ Object inspection registered")
+    
+    logger.info("All operation modules registered successfully!")
+    
+except Exception as e:
+    logger.error(f"Error registering operations: {str(e)}")
+    raise
+
+# ------------------
+# Legacy Code Maintained for Compatibility
+# All new functionality should be added to the modular structure above
+# ------------------
 
 # Create MCP server instance
 mcp = FastMCP("DaVinciResolveMCP")
@@ -3144,6 +3189,8 @@ def enable_keyframes(timeline_item_id: str, keyframe_mode: str = "All") -> str:
             'Sizing': 2
         }
         
+        }
+        
         result = timeline_item.SetProperty("KeyframeMode", keyframe_mode_map[keyframe_mode])
         
         if result:
@@ -3223,8 +3270,6 @@ def get_color_presets() -> List[Dict[str, Any]]:
 
 @mcp.tool()
 def save_color_preset(clip_name: str = None, preset_name: str = None, album_name: str = "DaVinci Resolve") -> str:
-    """Save a color preset from the specified clip.
-    
     Args:
         clip_name: Name of the clip to save preset from (uses current clip if None)
         preset_name: Name to give the preset (uses clip name if None)

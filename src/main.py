@@ -36,15 +36,16 @@ def check_setup():
 
 def run_server(debug=False):
     """Run the MCP server."""
-    from src.resolve_mcp_server import mcp
+    from src.server import create_mcp_server
     
     # Set logging level based on debug flag
     if debug:
         logging.getLogger("davinci-resolve-mcp").setLevel(logging.DEBUG)
         logger.info("Debug mode enabled")
     
-    # Run the server
+    # Create and run the server
     logger.info("Starting DaVinci Resolve MCP Server...")
+    mcp = create_mcp_server()
     mcp.run()
 
 def main():
